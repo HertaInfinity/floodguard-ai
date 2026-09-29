@@ -24,11 +24,14 @@ const API_URL =
 
 type ExtractedData = {
   source_type?: string | null
+
   location?: {
     text?: string | null
     latitude?: number | null
     longitude?: number | null
-    
+    geocoded?: boolean | null
+    geocoded_address?: string | null
+    coordinate_source?: string | null
   }
 
   people?: {
@@ -59,14 +62,51 @@ type ExtractedData = {
   }
 
   contact_info?: string[] | null
+
+  original_message?: string
+
+  priority?: {
+    priority?: string | null
+    priority_score?: number | null
+    score_breakdown?: {
+      people_score?: number | null
+      vulnerability_score?: number | null
+      needs_score?: number | null
+      request_score?: number | null
+      flood_score?: number | null
+      location_score?: number | null
+    } | null
+    inputs?: {
+      sos_people?: number | null
+      feature2_people?: number | null
+      effective_people?: number | null
+      flood_severity?: number | null
+    } | null
+    recommended_actions?: string[] | null
+    incident_id?: string | null
+    people?: number | null
+    latitude?: number | null
+    longitude?: number | null
+    status?: string | null
+  } | null
+}
+
+type SOSAssignment = {
+  assignment_id?: string | number | null
+  incident_id?: string | number | null
+  resource_id?: string | null
+  people_assigned?: string | number | null
+  status?: string | null
+  assigned_at?: string | null
 }
 
 type SOSRequest = {
-  id: number
+  id: string | number
   created_at: string
   status: string
   original_message: string
   extracted_data: ExtractedData
+  assignments?: SOSAssignment[] | null
 }
 
 function hasValue(value: unknown) {
@@ -121,7 +161,6 @@ function statusClass(status: string) {
 }
 
 export default function UserDashboard() {
-
   const [requests, setRequests] =
     useState<SOSRequest[]>([])
 
@@ -137,93 +176,87 @@ export default function UserDashboard() {
   const [refreshing, setRefreshing] =
     useState(false)
 
-    async function loadRequests(refresh = false) {
-      try {
-        if (refresh) {
-          setRefreshing(true)
-        } else {
-          setLoading(true)
-        }
-    
-        setError("")
-    
-        const controller = new AbortController()
-    
-        const timeout = setTimeout(() => {
-          controller.abort()
-        }, 5000)
-    
-        const response = await fetch(
-          `${API_URL}/sos`,
-          {
-            method: "GET",
-            cache: "no-store",
-            signal: controller.signal,
-          }
-        )
-    
-        clearTimeout(timeout)
-    
-        if (!response.ok) {
-          throw new Error(
-            `GET /sos failed with status ${response.status}`
-          )
-        }
-    
-        const data = await response.json()
-    
-        console.log("SOS API response:", data)
-    
-        if (!Array.isArray(data.requests)) {
-          throw new Error(
-            "Invalid SOS response format."
-          )
-        }
-    
-        const parsedRequests: SOSRequest[] =
-          data.requests.map((request: any) => {
-    
-            let extractedData = request.extracted_data
-    
-            // Backend may return extracted_data
-            // as a JSON string or an object.
-            if (typeof extractedData === "string") {
-              try {
-                extractedData = JSON.parse(extractedData)
-              } catch {
-                extractedData = {}
-              }
-            }
-    
-            return {
-              ...request,
-              extracted_data: extractedData || {},
-            }
-          })
-    
-        setRequests(parsedRequests)
-    
-      } catch (err: any) {
-    
-        console.error("SOS loading error:", err)
-    
-        if (err?.name === "AbortError") {
-          setError(
-            "The SOS server did not respond. Make sure the backend is running on port 8000."
-          )
-        } else {
-          setError(
-            "Unable to load your requests."
-          )
-        }
-    
-        setRequests([])
-    
-      } finally {
-        setLoading(false)
-        setRefreshing(false)
+  async function loadRequests(refresh = false) {
+    try {
+      if (refresh) {
+        setRefreshing(true)
+      } else {
+        setLoading(true)
       }
+
+      setError("")
+
+      const controller = new AbortController()
+
+      const timeout = setTimeout(() => {
+        controller.abort()
+      }, 15000)
+
+      const response = await fetch(
+        `${API_URL}/sos`,
+        {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal,
+        }
+      )
+
+      clearTimeout(timeout)
+
+      if (!response.ok) {
+        throw new Error(
+          `GET /sos failed with status ${response.status}`
+        )
+      }
+
+      const data = await response.json()
+
+      console.log("SOS API response:", data)
+
+      if (!Array.isArray(data.requests)) {
+        throw new Error(
+          "Invalid SOS response format."
+        )
+      }
+
+      const parsedRequests: SOSRequest[] =
+        data.requests.map((request: any) => {
+          let extractedData = request.extracted_data
+
+          if (typeof extractedData === "string") {
+            try {
+              extractedData = JSON.parse(extractedData)
+            } catch {
+              extractedData = {}
+            }
+          }
+
+          return {
+            ...request,
+            extracted_data: extractedData || {},
+          }
+        })
+
+      setRequests(parsedRequests)
+    } catch (err: any) {
+      console.error("SOS loading error:", err)
+
+      if (err?.name === "AbortError") {
+        setError(
+          "The SOS server did not respond. Make sure the backend is running on port 8000."
+        )
+      } else {
+        setError(
+          "Unable to load your requests."
+        )
+      }
+
+      setRequests([])
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
     }
+  }
 
   useEffect(() => {
     loadRequests()
@@ -232,12 +265,9 @@ export default function UserDashboard() {
   return (
     <main className="min-h-screen bg-[#f7fafc] text-[#102a43]">
 
-      {/* ============================================================
-          HEADER
-      ============================================================ */}
+      {/* HEADER */}
 
       <header className="border-b border-slate-200 bg-white">
-
         <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-4 sm:px-8">
 
           <div className="flex items-center gap-3">
@@ -247,7 +277,6 @@ export default function UserDashboard() {
             </div>
 
             <div>
-
               <div className="text-base font-semibold tracking-tight">
                 FloodGuard
               </div>
@@ -255,7 +284,6 @@ export default function UserDashboard() {
               <div className="text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-400">
                 Emergency assistance
               </div>
-
             </div>
 
           </div>
@@ -266,13 +294,10 @@ export default function UserDashboard() {
           </div>
 
         </div>
-
       </header>
 
 
-      {/* ============================================================
-          DASHBOARD
-      ============================================================ */}
+      {/* DASHBOARD */}
 
       <section className="mx-auto max-w-5xl px-5 py-10 sm:px-8 sm:py-14">
 
@@ -296,9 +321,7 @@ export default function UserDashboard() {
         </div>
 
 
-        {/* ============================================================
-            SOS CARD
-        ============================================================ */}
+        {/* SOS CARD */}
 
         <div className="overflow-hidden rounded-2xl border border-red-100 bg-white">
 
@@ -331,7 +354,6 @@ export default function UserDashboard() {
                 </div>
 
               </div>
-
 
               <Link
                 href="/user/sos"
@@ -373,16 +395,11 @@ export default function UserDashboard() {
         </div>
 
 
-        {/* ============================================================
-            OTHER USER OPTIONS
-        ============================================================ */}
+        {/* OTHER USER OPTIONS */}
 
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
 
-
-          {/* ========================================================
-              MY REQUESTS
-          ======================================================== */}
+          {/* MY REQUESTS */}
 
           <button
             type="button"
@@ -467,9 +484,7 @@ export default function UserDashboard() {
         </div>
 
 
-        {/* ============================================================
-            MY REQUESTS SECTION
-        ============================================================ */}
+        {/* MY REQUESTS SECTION */}
 
         <section
           id="my-requests"
@@ -699,9 +714,7 @@ export default function UserDashboard() {
         </section>
 
 
-        {/* ============================================================
-            FOOTER NOTE
-        ============================================================ */}
+        {/* FOOTER NOTE */}
 
         <div className="mt-8 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4">
 
@@ -721,9 +734,7 @@ export default function UserDashboard() {
       </section>
 
 
-      {/* ============================================================
-          REQUEST DETAILS MODAL
-      ============================================================ */}
+      {/* REQUEST DETAILS MODAL */}
 
       {selectedRequest && (
 
@@ -745,6 +756,10 @@ export default function UserDashboard() {
    REQUEST DETAILS
 ================================================================ */
 
+/* ================================================================
+   REQUEST DETAILS
+================================================================ */
+
 function RequestDetails({
   request,
   onClose,
@@ -753,346 +768,561 @@ function RequestDetails({
   onClose: () => void
 }) {
 
-  const data =
-    request.extracted_data
+  const data = request.extracted_data
+  const people = data.people
+  const needs = data.needs
+  const resources = data.request?.resources || []
+  const contacts = data.contact_info || []
+  const assignments = request.assignments || []
 
-  const people =
-    data.people
+  /* --------------------------------------------------------------
+     BUILD ASSISTANCE LIST
+  -------------------------------------------------------------- */
 
-  const needs =
-    data.needs
+  const assistance: {
+    label: string
+    icon: ReactNode
+  }[] = []
 
-  const resources =
-    data.request?.resources || []
+  if (needs?.rescue) {
+    assistance.push({
+      label: "Rescue",
+      icon: <LifeBuoy size={14} />,
+    })
+  }
 
-  const contacts =
-    data.contact_info || []
+  if (needs?.water) {
+    assistance.push({
+      label: "Water",
+      icon: <Droplets size={14} />,
+    })
+  }
+
+  if (needs?.food) {
+    assistance.push({
+      label: "Food",
+      icon: <Utensils size={14} />,
+    })
+  }
+
+  if (needs?.medicine) {
+    assistance.push({
+      label: "Medicine",
+      icon: <HeartPulse size={14} />,
+    })
+  }
+
+  if (needs?.shelter) {
+    assistance.push({
+      label: "Shelter",
+      icon: <Home size={14} />,
+    })
+  }
+
+  if (needs?.medical_transfer) {
+    assistance.push({
+      label: "Medical transfer",
+      icon: <HeartPulse size={14} />,
+    })
+  }
+
+  /* --------------------------------------------------------------
+     FALLBACK FOR OLDER SOS RECORDS
+  -------------------------------------------------------------- */
+
+  if (assistance.length === 0) {
+    resources.forEach((resource) => {
+      assistance.push({
+        label: formatLabel(resource),
+        icon: <LifeBuoy size={14} />,
+      })
+    })
+  }
+
+  /* --------------------------------------------------------------
+     ORIGINAL MESSAGE
+  -------------------------------------------------------------- */
+
+  const originalMessage =
+    request.original_message ||
+    data.original_message
+
 
   return (
 
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#0f2742]/30 p-0 backdrop-blur-[2px] sm:items-center sm:p-5">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#0f2742]/35 p-0 backdrop-blur-[3px] sm:items-center sm:p-4">
 
-      <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:rounded-2xl">
+      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl">
 
-        {/* HEADER */}
 
-        <div className="sticky top-0 flex items-center justify-between border-b border-slate-100 bg-white px-5 py-4">
+        {/* ========================================================
+            HEADER
+        ======================================================== */}
 
-          <div>
+        <div className="shrink-0 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
 
-            <div className="flex items-center gap-2">
+          <div className="flex items-start justify-between gap-4">
 
-              <h2 className="text-base font-semibold text-[#0f2742]">
-                SOS #{request.id}
-              </h2>
+            <div className="min-w-0">
 
-              <span
-                className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass(
-                  request.status
-                )}`}
-              >
-                {request.status}
-              </span>
+              <div className="flex flex-wrap items-center gap-2.5">
+
+                <h2 className="text-lg font-semibold tracking-tight text-[#0f2742] sm:text-xl">
+                  SOS #{request.id}
+                </h2>
+
+                <span
+                  className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${statusClass(
+                    request.status
+                  )}`}
+                >
+                  {formatLabel(request.status)}
+                </span>
+
+              </div>
+
+              <p className="mt-1 text-xs text-slate-400">
+                {formatDate(request.created_at)}
+              </p>
 
             </div>
 
-            <p className="mt-1 text-[11px] text-slate-400">
-              {formatDate(request.created_at)}
-            </p>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-[#0f2742]"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
 
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-600"
-          >
-            <X size={17} />
-          </button>
-
         </div>
 
 
-        <div className="space-y-6 p-5">
+        {/* ========================================================
+            CONTENT
+        ======================================================== */}
 
-          {/* LOCATION */}
+        <div className="min-h-0 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
 
-          {hasValue(
-            data.location?.text
-          ) && (
+          <div className="space-y-6">
 
-            <DetailSection
-              title="Location"
-              icon={<MapPin size={15} />}
-            >
-              <p className="text-sm font-medium text-[#0f2742]">
-                {data.location?.text}
-              </p>
-            </DetailSection>
 
-          )}
+            {/* ====================================================
+                EMERGENCY REPORT
+            ==================================================== */}
 
+            {hasValue(data.situation) && (
 
-          {/* PEOPLE */}
+              <section className="rounded-xl border border-blue-100 bg-blue-50/40 p-4">
 
-          {people && (
+                <div className="flex items-center gap-2 text-[#52769c]">
 
-            <DetailSection
-              title="People"
-              icon={<Users size={15} />}
-            >
+                  <FileText size={16} />
 
-              <div className="divide-y divide-slate-100">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-[0.15em]">
+                    Emergency report
+                  </h3>
 
-                <PeopleValue
-                  label="Total"
-                  value={people.total}
-                />
+                </div>
 
-                <PeopleValue
-                  label="Children"
-                  value={people.children}
-                />
+                <p className="mt-2.5 text-sm leading-6 text-[#29445f]">
+                  {data.situation}
+                </p>
 
-                <PeopleValue
-                  label="Elderly"
-                  value={people.elderly}
-                />
+              </section>
 
-                <PeopleValue
-                  label="Pregnant"
-                  value={people.pregnant}
-                />
+            )}
 
-                <PeopleValue
-                  label="Injured"
-                  value={people.injured}
-                />
 
-                <PeopleValue
-                  label="Missing"
-                  value={people.missing}
-                />
+            {/* ====================================================
+                LOCATION
+            ==================================================== */}
 
-                <PeopleValue
-                  label="Deceased"
-                  value={people.deceased}
-                />
+            {data.location && (
 
-                <PeopleValue
-                  label="Mobility impaired"
-                  value={
-                    people.mobility_impaired
-                  }
-                />
+              <DetailSection
+                title="Location"
+                icon={<MapPin size={18} />}
+              >
 
-              </div>
+                <div className="space-y-3">
 
-            </DetailSection>
+                  {hasValue(data.location.text) && (
 
-          )}
-
-
-          {/* REQUEST */}
-
-          {/* REQUEST */}
-
-{(
-  hasValue(data.source_type) ||
-  hasValue(data.request?.type)
-) && (
-
-  <DetailSection
-    title="Request"
-    icon={<LifeBuoy size={15} />}
-  >
-
-    {/* SOS TYPE */}
-
-    {hasValue(data.source_type) && (
-      <div>
-
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-          SOS Type
-        </div>
-
-        <p className="mt-1 text-sm font-medium text-[#0f2742]">
-          {formatLabel(
-            String(data.source_type)
-          )}
-        </p>
-
-      </div>
-    )}
-
-
-    {/* PRIMARY REQUEST */}
-
-    {hasValue(data.request?.type) && (
-      <div className="mt-4">
-
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-          Primary Request
-        </div>
-
-        <p className="mt-1 text-sm font-medium text-[#0f2742]">
-          {formatLabel(
-            String(data.request?.type)
-          )}
-        </p>
-
-      </div>
-    )}
-
-  </DetailSection>
-
-)}
-
-
-          {/* NEEDS */}
-
-          {needs && (
-
-            <DetailSection
-              title="Assistance needed"
-              icon={<HeartPulse size={15} />}
-            >
-
-              <div className="flex flex-wrap gap-2">
-
-                {needs.rescue && (
-                  <Need
-                    label="Rescue"
-                    icon={
-                      <LifeBuoy size={13} />
-                    }
-                  />
-                )}
-
-                {needs.water && (
-                  <Need
-                    label="Water"
-                    icon={
-                      <Droplets size={13} />
-                    }
-                  />
-                )}
-
-                {needs.food && (
-                  <Need
-                    label="Food"
-                    icon={
-                      <Utensils size={13} />
-                    }
-                  />
-                )}
-
-                {needs.medicine && (
-                  <Need
-                    label="Medicine"
-                    icon={
-                      <HeartPulse size={13} />
-                    }
-                  />
-                )}
-
-                {needs.shelter && (
-                  <Need
-                    label="Shelter"
-                    icon={
-                      <Home size={13} />
-                    }
-                  />
-                )}
-
-                {needs.medical_transfer && (
-                  <Need
-                    label="Medical transfer"
-                    icon={
-                      <HeartPulse size={13} />
-                    }
-                  />
-                )}
-
-              </div>
-
-            </DetailSection>
-
-          )}
-
-
-          {/* SITUATION */}
-
-          {hasValue(data.situation) && (
-
-            <DetailSection
-              title="Situation"
-              icon={
-                <FileText size={15} />
-              }
-            >
-
-              <p className="text-sm leading-6 text-slate-600">
-                {data.situation}
-              </p>
-
-            </DetailSection>
-
-          )}
-
-
-          {/* CONTACT */}
-
-          {contacts.length > 0 && (
-
-            <DetailSection
-              title="Contact"
-              icon={
-                <Users size={15} />
-              }
-            >
-
-              <div className="space-y-1">
-
-                {contacts.map(
-                  (contact) => (
-
-                    <p
-                      key={contact}
-                      className="text-sm font-medium text-[#0f2742]"
-                    >
-                      {contact}
+                    <p className="text-base font-medium leading-6 text-[#102a43]">
+                      {data.location.text}
                     </p>
 
-                  )
-                )}
-                        {/* ORIGINAL SOS MESSAGE */}
+                  )}
 
-          {hasValue(request.original_message) && (
-              <div className="pt-2">
-<DetailSection
-  title="Original SOS message"
-  icon={
-    <FileText size={15} />
-  }
->
+                  <div className="divide-y divide-slate-200 border-y border-slate-200">
 
-  <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                    <DetailRow
+                      label="Latitude"
+                      value={data.location.latitude}
+                    />
 
-    <p className="whitespace-pre-wrap wrap-break-word text-sm leading-6 text-slate-600">
-      {request.original_message}
-    </p>
+                    <DetailRow
+                      label="Longitude"
+                      value={data.location.longitude}
+                    />
 
-  </div>
+                    <DetailRow
+                      label="Address"
+                      value={data.location.geocoded_address}
+                    />
 
-</DetailSection>
-</div>
-)}
+                    <DetailRow
+                      label="Location source"
+                      value={
+                        data.location.coordinate_source
+                          ? formatLabel(
+                              data.location.coordinate_source
+                            )
+                          : null
+                      }
+                    />
+
+                  </div>
+
+                </div>
+
+              </DetailSection>
+
+            )}
+
+
+            {/* ====================================================
+                PEOPLE
+            ==================================================== */}
+
+            {people && (
+
+              <DetailSection
+                title="People affected"
+                icon={<Users size={18} />}
+              >
+
+                <div className="divide-y divide-slate-200 border-y border-slate-200">
+
+                  <DetailRow
+                    label="Total"
+                    value={people.total}
+                  />
+
+                  <DetailRow
+                    label="Children"
+                    value={people.children}
+                  />
+
+                  <DetailRow
+                    label="Elderly"
+                    value={people.elderly}
+                  />
+
+                  <DetailRow
+                    label="Pregnant"
+                    value={people.pregnant}
+                  />
+
+                  <DetailRow
+                    label="Injured"
+                    value={people.injured}
+                  />
+
+                  {hasValue(people.missing) && (
+
+                    <DetailRow
+                      label="Missing"
+                      value={people.missing}
+                    />
+
+                  )}
+
+                  {hasValue(people.deceased) && (
+
+                    <DetailRow
+                      label="Deceased"
+                      value={people.deceased}
+                    />
+
+                  )}
+
+                  <DetailRow
+                    label="Mobility impaired"
+                    value={people.mobility_impaired}
+                  />
+
+                </div>
+
+              </DetailSection>
+
+            )}
+
+
+            {/* ====================================================
+                HELP NEEDED
+            ==================================================== */}
+
+            {(assistance.length > 0 ||
+              hasValue(data.source_type) ||
+              hasValue(data.request?.type)) && (
+
+              <DetailSection
+                title="Help needed"
+                icon={<LifeBuoy size={18} />}
+              >
+
+                <div className="space-y-4">
+
+
+                  {/* REQUEST DETAILS */}
+
+                  {(hasValue(data.source_type) ||
+                    hasValue(data.request?.type)) && (
+
+                    <div className="divide-y divide-slate-200 border-y border-slate-200">
+
+                      {hasValue(data.source_type) && (
+
+                        <DetailRow
+                          label="SOS type"
+                          value={formatLabel(
+                            String(data.source_type)
+                          )}
+                        />
+
+                      )}
+
+                      {hasValue(data.request?.type) && (
+
+                        <DetailRow
+                          label="Primary request"
+                          value={formatLabel(
+                            String(data.request?.type)
+                          )}
+                        />
+
+                      )}
+
+                    </div>
+
+                  )}
+
+
+                  {/* ASSISTANCE CHIPS */}
+
+                  {assistance.length > 0 && (
+
+                    <div>
+
+                      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#91a4bb]">
+                        Assistance needed
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+
+                        {assistance.map(
+                          (item, index) => (
+
+                            <Need
+                              key={`${item.label}-${index}`}
+                              label={item.label}
+                              icon={item.icon}
+                            />
+
+                          )
+                        )}
+
+                      </div>
+
+                    </div>
+
+                  )}
+
+                </div>
+
+              </DetailSection>
+
+            )}
+
+
+            {/* ====================================================
+                RESPONSE
+            ==================================================== */}
+
+            <DetailSection
+              title="Response"
+              icon={<ShieldAlert size={18} />}
+            >
+
+              <div className="divide-y divide-slate-200 border-y border-slate-200">
+
+                <DetailRow
+                  label="Status"
+                  value={formatLabel(request.status)}
+                />
+
               </div>
+
+
+              {/* ASSIGNMENTS */}
+
+              {assignments.length > 0 && (
+
+                <div className="mt-3 divide-y divide-slate-200 border-y border-slate-200">
+
+                  {assignments.map(
+                    (assignment, index) => (
+
+                      <div
+                        key={`${assignment.assignment_id ?? index}`}
+                        className="py-3"
+                      >
+
+                        <div className="flex items-center justify-between gap-4">
+
+                          <span className="text-sm text-slate-500">
+
+                            {hasValue(
+                              assignment.resource_id
+                            )
+                              ? String(
+                                  assignment.resource_id
+                                )
+                              : `Response ${index + 1}`}
+
+                          </span>
+
+
+                          {hasValue(
+                            assignment.status
+                          ) && (
+
+                            <span
+                              className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${statusClass(
+                                String(
+                                  assignment.status
+                                )
+                              )}`}
+                            >
+                              {formatLabel(
+                                String(
+                                  assignment.status
+                                )
+                              )}
+                            </span>
+
+                          )}
+
+                        </div>
+
+
+                        <div className="mt-1.5 grid gap-1 text-xs text-slate-500 sm:grid-cols-2">
+
+                          {hasValue(
+                            assignment.people_assigned
+                          ) && (
+
+                            <span>
+                              {assignment.people_assigned}{" "}
+                              people assigned
+                            </span>
+
+                          )}
+
+                          {hasValue(
+                            assignment.assigned_at
+                          ) && (
+
+                            <span className="sm:text-right">
+                              {formatDate(
+                                String(
+                                  assignment.assigned_at
+                                )
+                              )}
+                            </span>
+
+                          )}
+
+                        </div>
+
+                      </div>
+
+                    )
+                  )}
+
+                </div>
+
+              )}
 
             </DetailSection>
 
-          )}
+
+            {/* ====================================================
+                CONTACT
+            ==================================================== */}
+
+            {contacts.length > 0 && (
+
+              <DetailSection
+                title="Contact"
+                icon={<HeartPulse size={18} />}
+              >
+
+                <div className="divide-y divide-slate-200 border-y border-slate-200">
+
+                  {contacts.map(
+                    (contact, index) => (
+
+                      <DetailRow
+                        key={`${contact}-${index}`}
+                        label={
+                          contacts.length > 1
+                            ? `Contact ${index + 1}`
+                            : "Contact"
+                        }
+                        value={contact}
+                      />
+
+                    )
+                  )}
+
+                </div>
+
+              </DetailSection>
+
+            )}
+
+
+            {/* ====================================================
+                ORIGINAL SOS MESSAGE
+            ==================================================== */}
+
+            {hasValue(originalMessage) && (
+
+              <DetailSection
+                title="Original SOS message"
+                icon={<FileText size={18} />}
+              >
+
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5">
+
+                  <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">
+                    {originalMessage}
+                  </p>
+
+                </div>
+
+              </DetailSection>
+
+            )}
+
+          </div>
 
         </div>
 
@@ -1117,14 +1347,16 @@ function DetailSection({
   icon: ReactNode
   children: ReactNode
 }) {
-  return (
-    <div>
 
-      <div className="mb-3 flex items-center gap-2 text-slate-400">
+  return (
+
+    <section>
+
+      <div className="mb-5 flex items-center gap-3 text-[#91a4bb]">
 
         {icon}
 
-        <h3 className="text-[10px] font-semibold uppercase tracking-[0.15em]">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.15em]">
           {title}
         </h3>
 
@@ -1132,17 +1364,46 @@ function DetailSection({
 
       {children}
 
-    </div>
+    </section>
+
   )
 }
 
 
-function PeopleValue({
+function DetailItem({
   label,
   value,
 }: {
   label: string
   value?: string | number | null
+}) {
+
+  if (!hasValue(value)) return null
+
+  return (
+
+    <div>
+
+      <div className="text-xs font-semibold uppercase tracking-[0.15em] text-[#91a4bb]">
+        {label}
+      </div>
+
+      <div className="mt-1.5 text-xl leading-8 text-[#102a43]">
+        {String(value)}
+      </div>
+
+    </div>
+
+  )
+}
+
+
+function DetailRow({
+  label,
+  value,
+}: {
+  label: string
+  value?: string | number | boolean | null
 }) {
 
   if (!hasValue(value)) {
@@ -1151,14 +1412,14 @@ function PeopleValue({
 
   return (
 
-    <div className="flex items-center justify-between py-2">
+    <div className="flex items-start justify-between gap-6 py-3.5">
 
-      <span className="text-xs text-slate-500">
+      <span className="shrink-0 text-sm text-slate-500">
         {label}
       </span>
 
-      <span className="text-xs font-semibold text-[#0f2742]">
-        {value}
+      <span className="max-w-[65%] whitespace-pre-wrap break-words text-right text-sm font-semibold text-[#0f2742]">
+        {String(value)}
       </span>
 
     </div>
@@ -1177,9 +1438,12 @@ function Need({
 
   return (
 
-    <span className="inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-600">
+    <span className="inline-flex items-center gap-2 rounded-lg bg-slate-50 px-3.5 py-2.5 text-sm font-medium text-slate-600">
+
       {icon}
+
       {label}
+
     </span>
 
   )

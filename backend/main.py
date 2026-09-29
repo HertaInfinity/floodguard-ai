@@ -1,7 +1,7 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-
+import traceback
 from backend.operations.allocator import run_module5
 from backend.operations.shelter_allocator import run_module7
 from backend.operations.relief_planner import run_module8
@@ -113,9 +113,10 @@ SOS_STORE = load_sos_store()
 SOS_COUNTER = (
     max(
         [
-            int(item.get("id", 0))
+            int(str(item.get("id", ""))[3:])
             for item in SOS_STORE
-            if str(item.get("id", "")).isdigit()
+            if str(item.get("id", "")).startswith("INC")
+            and str(item.get("id", ""))[3:].isdigit()
         ]
         or [0]
     )
@@ -1068,8 +1069,6 @@ def _geocode_sos_location(extracted):
 
 @app.post("/sos")
 async def analyze_sos(request: SOSRequest):
-    global SOS_COUNTER
-
     try:
         # --------------------------------------------------------
         # FEATURE 3 — SOS INTELLIGENCE
@@ -1095,8 +1094,7 @@ async def analyze_sos(request: SOSRequest):
             result.get("location")
         )
 
-        # Convert the Lyzr location (e.g. Dibrugarh, Assam) to coordinates.
-        # No browser/device GPS is used.
+        # Convert the human-readable SOS location to coordinates.
         _geocode_sos_location(result)
 
         # --------------------------------------------------------
@@ -1108,63 +1106,83 @@ async def analyze_sos(request: SOSRequest):
             flood_severity=0.0
         )
 
+        # --------------------------------------------------------
+        # CREATE A UNIQUE SOS ID
+        # --------------------------------------------------------
+        existing_ids = []
+
+        for sos in SOS_STORE:
+            sid = str(sos.get("id", ""))
+            if sid.startswith("INC") and sid[3:].isdigit():
+                existing_ids.append(int(sid[3:]))
+
+        next_number = max(existing_ids, default=0) + 1
+        incident_id = f"INC{next_number}"
+
         location = result.get("location", {})
+
         priority_result.update({
-            "incident_id": f"INC{SOS_COUNTER}",
+            "incident_id": incident_id,
             "people": priority_result["inputs"]["effective_people"],
             "latitude": location.get("latitude"),
             "longitude": location.get("longitude"),
             "status": "WAITING_FOR_RESCUE",
         })
-        SOS_COUNTER += 1
 
         result["priority"] = priority_result
+
+        # --------------------------------------------------------
+        # SAVE INCIDENT RECORD
+        # --------------------------------------------------------
+        # This only records the incident for the later priority /
+        # resource-allocation features. It does NOT assign a team.
         try:
             location_text = result.get("location", {}).get("text")
             incident_row = priority_result_to_incident_row(
-                priority_result, location_text=location_text
+                priority_result,
+                location_text=location_text
             )
+
             incident_columns = {
-                "incident_id", "location_text", "latitude", "longitude",
-                "people_count", "priority_score", "priority_level", "status",
+                "incident_id",
+                "location_text",
+                "latitude",
+                "longitude",
+                "people_count",
+                "priority_score",
+                "priority_level",
+                "status",
                 "people_remaining"
             }
-            operations_supabase.table("rescue_incidents").upsert(
+
+            operations_supabase.table(
+                "rescue_incidents"
+            ).upsert(
                 {
                     key: value
                     for key, value in incident_row.items()
                     if key in incident_columns
                 }
             ).execute()
+
         except Exception as log_err:
-            raise RuntimeError(
-                f"Failed to save incident to rescue_incidents: {log_err}"
+            print(
+                f"[WARN] Failed to save incident to rescue_incidents: {log_err}"
             )
 
-        # Allocate boats immediately using priority score and remaining capacity.
-        run_module5()
-
-        incident_id = priority_result["incident_id"]
-        assignments = (
-            operations_supabase.table("rescue_assignments")
-            .select("*")
-            .eq("incident_id", incident_id)
-            .execute()
-            .data
-        )
-        incident = (
-            operations_supabase.table("rescue_incidents")
-            .select("*")
-            .eq("incident_id", incident_id)
-            .single()
-            .execute()
-            .data
-        )
+        # --------------------------------------------------------
+        # NO AUTOMATIC RESOURCE ASSIGNMENT
+        # --------------------------------------------------------
+        # Resource allocation is a separate feature.
+        assignments = []
 
         sos_record = {
             "id": incident_id,
-            "created_at": incident["created_at"],
-            "status": "ASSIGNED" if assignments else "PENDING",
+            "created_at": time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ",
+                time.gmtime()
+            ),
+            "status": "PENDING",
             "original_message": request.message,
             "extracted_data": result,
             "assignments": assignments,
@@ -1196,102 +1214,103 @@ async def analyze_sos(request: SOSRequest):
 @app.get("/sos")
 def get_sos_requests():
     try:
-        # Backfill coordinates for SOS records created before geocoding existed.
+        # Backfill coordinates for stored SOS records when needed.
         changed = False
+
         for sos in SOS_STORE:
             extracted = sos.get("extracted_data")
+
             if isinstance(extracted, str):
                 try:
                     extracted = json.loads(extracted)
                 except (json.JSONDecodeError, TypeError):
-                    extracted = None
+                    extracted = {}
 
-            if isinstance(extracted, dict):
-                location = extracted.get("location")
-                has_coordinates = (
-                    isinstance(location, dict)
-                    and location.get("latitude") is not None
-                    and location.get("longitude") is not None
-                )
-                if not has_coordinates and _geocode_sos_location(extracted):
+            if not isinstance(extracted, dict):
+                extracted = {}
+
+            location = extracted.get("location")
+
+            has_coordinates = (
+                isinstance(location, dict)
+                and location.get("latitude") is not None
+                and location.get("longitude") is not None
+            )
+
+            if not has_coordinates:
+                if _geocode_sos_location(extracted):
                     sos["extracted_data"] = extracted
                     changed = True
 
         if changed:
             save_sos_store(SOS_STORE)
 
-        incidents = (
-            operations_supabase.table("rescue_incidents")
-            .select("*")
-            .order("created_at", desc=True)
-            .execute()
-            .data
-        )
+        # IMPORTANT:
+        # Do NOT query rescue_assignments here.
+        # A submitted SOS remains PENDING until the separate
+        # resource-allocation feature explicitly assigns a resource.
         requests = []
-        stored_sos = {
-            str(item.get("id")): item
-            for item in SOS_STORE
-        }
-        for incident in incidents:
-            assignments = (
-                operations_supabase.table("rescue_assignments")
-                .select("*")
-                .eq("incident_id", incident["incident_id"])
-                .execute()
-                .data
-            )
 
-            stored_request = stored_sos.get(
-                str(incident["incident_id"]),
-                {}
-            )
-            extracted_data = stored_request.get(
+        for sos in reversed(SOS_STORE):
+            extracted_data = sos.get(
                 "extracted_data",
                 {}
             )
+
             if isinstance(extracted_data, str):
                 try:
-                    extracted_data = json.loads(extracted_data)
-                except (json.JSONDecodeError, TypeError):
+                    extracted_data = json.loads(
+                        extracted_data
+                    )
+                except (
+                    json.JSONDecodeError,
+                    TypeError
+                ):
                     extracted_data = {}
+
             if not isinstance(extracted_data, dict):
                 extracted_data = {}
 
-            extracted_data["location"] = {
-                **extracted_data.get("location", {}),
-                "text": incident.get("location_text"),
-                "latitude": incident.get("latitude"),
-                "longitude": incident.get("longitude"),
-            }
-            extracted_data["people"] = {
-                **extracted_data.get("people", {}),
-                "total": incident.get("people_count"),
-            }
-            extracted_data["priority"] = {
-                **extracted_data.get("priority", {}),
-                "priority_score": incident.get("priority_score"),
-                "priority_level": incident.get("priority_level"),
-            }
-
             requests.append({
-                "id": incident["incident_id"],
-                "created_at": incident["created_at"],
-                "status": "ASSIGNED" if assignments else "PENDING",
-                "original_message": stored_request.get(
+                "id": sos.get("id"),
+                "created_at": sos.get("created_at"),
+                "status": sos.get(
+                    "status",
+                    "PENDING"
+                ),
+                "original_message": sos.get(
                     "original_message",
-                    extracted_data.get("original_message", "")
+                    extracted_data.get(
+                        "original_message",
+                        ""
+                    )
                 ),
                 "extracted_data": extracted_data,
-                "assignments": assignments,
+                "assignments": sos.get(
+                    "assignments",
+                    []
+                ) or [],
             })
+
         return {
             "requests": requests
         }
 
     except Exception as e:
+        print(
+            "\n========== GET /sos ERROR =========="
+        )
+        print(f"ERROR: {e}")
+        traceback.print_exc()
+        print(
+            "====================================\n"
+        )
+
         raise HTTPException(
             status_code=500,
-            detail=f"Could not fetch SOS requests: {str(e)}"
+            detail=(
+                f"Could not fetch SOS requests: {str(e)}"
+            )
         )
 
 
@@ -4205,10 +4224,10 @@ async def get_relief_status():
         total_allocated = sum(float(b["total_allocated"]) for b in budgets)
         total_spent = sum(float(e["amount"]) for e in expenses)
         return {
-            "assessments": assessments,
-            "allocated": total_allocated,
-            "spent": total_spent,
-            "remaining": total_allocated - total_spent,
+            "assessments": assessments ,
+            "allocated": total_allocated ,
+            "spent": total_spent ,
+            "remaining": total_allocated - total_spent ,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load relief data: {str(e)}")

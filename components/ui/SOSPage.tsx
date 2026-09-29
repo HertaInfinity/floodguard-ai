@@ -5,7 +5,6 @@ import {
   X,
   MapPin,
   Users,
-  Clock3,
   Phone,
   FileText,
   ShieldAlert,
@@ -16,17 +15,16 @@ import {
 } from "lucide-react"
 
 import {
-  Icon,
   Panel,
   SectionHeader,
   StatusBadge,
 } from "@/components/ui/shared"
 
 const API_URL =
-  process.env.NEXT_PUBLIC_FLOODGAURD_API_URL || "http://127.0.0.1:8000"
+  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
 
 type SOSRequest = {
-  id: string
+  id: string | number
   created_at: string
   status: string
   original_message: string
@@ -35,15 +33,14 @@ type SOSRequest = {
 
 type ExtractedData = {
   source_type?: string
-  priority?: {
-    priority_level?: string
-    priority_score?: number
-  }
 
   location?: {
     text?: string | null
     latitude?: number | null
     longitude?: number | null
+    geocoded?: boolean | null
+    geocoded_address?: string | null
+    coordinate_source?: string | null
   }
 
   people?: {
@@ -74,9 +71,38 @@ type ExtractedData = {
   }
 
   contact_info?: string[] | null
-  original_message?: string
-}
 
+  original_message?: string
+
+  priority?: {
+    priority?: string | null
+    priority_score?: number | null
+
+    score_breakdown?: {
+      people_score?: number | null
+      vulnerability_score?: number | null
+      needs_score?: number | null
+      request_score?: number | null
+      flood_score?: number | null
+      location_score?: number | null
+    } | null
+
+    inputs?: {
+      sos_people?: number | null
+      feature2_people?: number | null
+      effective_people?: number | null
+      flood_severity?: number | null
+    } | null
+
+    recommended_actions?: string[] | null
+
+    incident_id?: string | null
+    people?: number | null
+    latitude?: number | null
+    longitude?: number | null
+    status?: string | null
+  } | null
+}
 
 function parseExtractedData(
   data: ExtractedData | string
@@ -92,7 +118,6 @@ function parseExtractedData(
   return data || {}
 }
 
-
 function formatDate(date: string) {
   return new Date(date).toLocaleString("en-IN", {
     day: "2-digit",
@@ -102,7 +127,6 @@ function formatDate(date: string) {
   })
 }
 
-
 function formatLabel(value?: string | null) {
   if (!value) return ""
 
@@ -111,7 +135,6 @@ function formatLabel(value?: string | null) {
     .toLowerCase()
     .replace(/\b\w/g, (char) => char.toUpperCase())
 }
-
 
 function getPriority(data: ExtractedData) {
   const people = data.people
@@ -148,7 +171,6 @@ function getPriority(data: ExtractedData) {
   return "MEDIUM"
 }
 
-
 const priorityTone: Record<
   string,
   "critical" | "high" | "medium" | "good" | "neutral"
@@ -159,9 +181,7 @@ const priorityTone: Record<
   LOW: "neutral",
 }
 
-
 export default function SOSPage() {
-
   const [requests, setRequests] =
     useState<SOSRequest[]>([])
 
@@ -174,11 +194,8 @@ export default function SOSPage() {
   const [error, setError] =
     useState("")
 
-
   async function loadRequests() {
-
     try {
-
       setLoading(true)
       setError("")
 
@@ -198,34 +215,24 @@ export default function SOSPage() {
       const data = await response.json()
 
       setRequests(data.requests || [])
-
     } catch (err) {
-
       setError(
         err instanceof Error
           ? err.message
           : "Unable to load SOS requests."
       )
-
     } finally {
-
       setLoading(false)
-
     }
   }
-
 
   useEffect(() => {
     loadRequests()
   }, [])
 
-
   return (
-
     <div className="space-y-6">
-
       <Panel className="p-5">
-
         <SectionHeader
           eyebrow="Incoming alerts"
           title="Emergency request queue"
@@ -240,68 +247,50 @@ export default function SOSPage() {
           }
         />
 
-
         {loading && (
-
           <div className="py-12 text-center text-sm text-slate-500">
             Loading SOS requests...
           </div>
-
         )}
 
-
         {error && !loading && (
-
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
             {error}
           </div>
-
         )}
-
 
         {!loading &&
           !error &&
           requests.length === 0 && (
-
             <div className="py-12 text-center text-sm text-slate-500">
               No SOS requests received yet.
             </div>
-
           )}
-
 
         {!loading &&
           !error &&
           requests.length > 0 && (
-
             <div className="overflow-x-auto">
-
               {/* TABLE HEADER */}
 
-              <div className="grid min-w-205 grid-cols-[1.1fr_1.4fr_.6fr_.8fr_1.4fr] gap-4 border-b border-slate-200 px-4 pb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-500">
-
+              <div className="grid min-w-[820px] grid-cols-[1.1fr_1.4fr_.6fr_.8fr_1.4fr] gap-4 border-b border-slate-200 px-4 pb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                 <span>Priority / ID</span>
                 <span>Location</span>
                 <span>People</span>
                 <span>Time</span>
                 <span>Status / action</span>
-
               </div>
-
 
               {/* REQUESTS */}
 
-              <div className="min-w-205 divide-y divide-slate-200">
-
+              <div className="min-w-[820px] divide-y divide-slate-200">
                 {requests.map((request) => {
-
                   const extracted =
                     parseExtractedData(
                       request.extracted_data
                     )
 
                   const priority =
-                    extracted.priority?.priority_level ||
                     getPriority(extracted)
 
                   const location =
@@ -315,9 +304,7 @@ export default function SOSPage() {
                   const resources =
                     extracted.request?.resources || []
 
-
                   return (
-
                     <button
                       key={request.id}
                       type="button"
@@ -330,11 +317,9 @@ export default function SOSPage() {
                           : "bg-white"
                       }`}
                     >
-
                       {/* PRIORITY / ID */}
 
                       <div className="flex items-center gap-2">
-
                         <span
                           className={`h-2 w-2 shrink-0 rounded-full ${
                             priority === "CRITICAL"
@@ -346,9 +331,8 @@ export default function SOSPage() {
                         />
 
                         <div className="flex items-center gap-2">
-
                           <span className="text-sm font-semibold text-[#102A43]">
-                            {request.id}
+                            SOS-{request.id}
                           </span>
 
                           <StatusBadge
@@ -358,31 +342,24 @@ export default function SOSPage() {
                               "neutral"
                             }
                           />
-
                         </div>
-
                       </div>
-
 
                       {/* LOCATION */}
 
                       <div className="flex items-center gap-2 text-sm text-slate-700">
-
                         <MapPin size={15} />
 
                         <span className="truncate">
                           {location}
                         </span>
-
                       </div>
-
 
                       {/* PEOPLE */}
 
                       <span className="text-sm font-semibold text-[#0f2742]">
                         {people}
                       </span>
-
 
                       {/* TIME */}
 
@@ -392,17 +369,16 @@ export default function SOSPage() {
                         )}
                       </span>
 
-
                       {/* STATUS */}
 
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-
                         <StatusBadge
                           label={request.status}
                           tone={
-                            request.status === "PENDING"
+                            request.status === "Pending"
                               ? "warning"
-                              : request.status === "ASSIGNED"
+                              : request.status ===
+                                  "Rescue Assigned"
                                 ? "medium"
                                 : "good"
                           }
@@ -414,43 +390,30 @@ export default function SOSPage() {
                             .map(formatLabel)
                             .join(" · ")}
                         </span>
-
                       </div>
-
                     </button>
-
                   )
-
                 })}
-
               </div>
-
             </div>
-
           )}
-
       </Panel>
-
 
       {/* ============================================================
           FULL SOS DETAILS MODAL
       ============================================================ */}
 
       {selectedRequest && (
-
         <SOSDetailsModal
           request={selectedRequest}
           onClose={() =>
             setSelectedRequest(null)
           }
         />
-
       )}
-
     </div>
   )
 }
-
 
 /* ================================================================
    SOS DETAILS MODAL
@@ -463,7 +426,6 @@ function SOSDetailsModal({
   request: SOSRequest
   onClose: () => void
 }) {
-
   const data =
     parseExtractedData(
       request.extracted_data
@@ -489,29 +451,22 @@ function SOSDetailsModal({
     data.original_message ||
     ""
 
-
   return (
-
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f2742]/40 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
-
       <div
         className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl"
         onClick={(event) =>
           event.stopPropagation()
         }
       >
-
         {/* HEADER */}
 
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-
           <div>
-
             <div className="flex items-center gap-3">
-
               <h2 className="text-lg font-semibold text-[#0f2742]">
                 SOS-{request.id}
               </h2>
@@ -519,15 +474,12 @@ function SOSDetailsModal({
               <span className="rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1 text-[10px] font-semibold uppercase text-orange-600">
                 {request.status}
               </span>
-
             </div>
 
             <p className="mt-1 text-xs text-slate-400">
               {formatDate(request.created_at)}
             </p>
-
           </div>
-
 
           <button
             type="button"
@@ -536,315 +488,483 @@ function SOSDetailsModal({
           >
             <X size={18} />
           </button>
-
         </div>
 
-
         <div className="space-y-7 p-6">
-
 
           {/* ======================================================
               LOCATION
           ====================================================== */}
 
           {location && (
-
             <ModalSection
               title="Location"
               icon={<MapPin size={16} />}
             >
+              <div>
+                <DetailRow
+                  label="Location"
+                  value={location.text}
+                />
 
-              <p className="text-sm font-semibold text-[#0f2742]">
-                {location.text ||
-                  "Location unavailable"}
-              </p>
+                <DetailRow
+                  label="Latitude"
+                  value={location.latitude}
+                />
 
-              {(location.latitude != null ||
-                location.longitude != null) && (
+                <DetailRow
+                  label="Longitude"
+                  value={location.longitude}
+                />
 
-                <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                  {location.latitude != null && (
-                    <p className="text-xs font-medium text-slate-600">
-                      Latitude: {location.latitude}
-                    </p>
+                <DetailRow
+                  label="Geocoded"
+                  value={
+                    location.geocoded != null
+                      ? location.geocoded
+                        ? "Yes"
+                        : "No"
+                      : null
+                  }
+                />
+
+                <DetailRow
+                  label="Geocoded address"
+                  value={location.geocoded_address}
+                />
+
+                <DetailRow
+                  label="Coordinate source"
+                  value={formatLabel(
+                    location.coordinate_source
                   )}
-
-                  {location.longitude != null && (
-                    <p className="mt-1 text-xs font-medium text-slate-600">
-                      Longitude: {location.longitude}
-                    </p>
-                  )}
-                </div>
-
-              )}
-
+                />
+              </div>
             </ModalSection>
-
           )}
-
 
           {/* ======================================================
               PEOPLE
           ====================================================== */}
 
           {people && (
-
             <ModalSection
               title="People"
               icon={<Users size={16} />}
             >
-
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-
-                <DetailBox
+              <div>
+                <DetailRow
                   label="Total"
                   value={people.total}
                 />
 
-                <DetailBox
+                <DetailRow
                   label="Children"
                   value={people.children}
                 />
 
-                <DetailBox
+                <DetailRow
                   label="Elderly"
                   value={people.elderly}
                 />
 
-                <DetailBox
-                  label="Injured"
-                  value={people.injured}
-                />
-
-                <DetailBox
-                  label="Missing"
-                  value={people.missing}
-                />
-
-                <DetailBox
+                <DetailRow
                   label="Pregnant"
                   value={people.pregnant}
                 />
 
-                <DetailBox
+                <DetailRow
+                  label="Injured"
+                  value={people.injured}
+                />
+
+                <DetailRow
+                  label="Missing"
+                  value={people.missing}
+                />
+
+                <DetailRow
                   label="Deceased"
                   value={people.deceased}
                 />
 
-                <DetailBox
+                <DetailRow
                   label="Mobility impaired"
-                  value={people.mobility_impaired}
+                  value={
+                    people.mobility_impaired
+                  }
                 />
-
               </div>
-
             </ModalSection>
-
           )}
 
-
           {/* ======================================================
-              SOS TYPE
+              REQUEST
           ====================================================== */}
 
-          {data.request?.type && (
-
+          {(data.source_type ||
+            data.request?.type ||
+            resources.length > 0) && (
             <ModalSection
-              title="SOS category"
+              title="Request"
               icon={<ShieldAlert size={16} />}
             >
+              <div>
+                <DetailRow
+                  label="SOS type"
+                  value={formatLabel(
+                    data.source_type
+                  )}
+                />
 
-              <p className="text-sm font-semibold text-[#0f2742]">
-                {formatLabel(
-                  data.request.type
-                )}
-              </p>
-
-            </ModalSection>
-
-          )}
-
-
-          {/* ======================================================
-              RESOURCES
-          ====================================================== */}
-
-          {resources.length > 0 && (
-
-            <ModalSection
-              title="Requested resources"
-              icon={<HeartPulse size={16} />}
-            >
-
-              <div className="flex flex-wrap gap-2">
-
-                {resources.map(
-                  (resource, index) => (
-
-                    <span
-                      key={`${resource}-${index}`}
-                      className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700"
-                    >
-                      {formatLabel(resource)}
-                    </span>
-
-                  )
-                )}
-
+                <DetailRow
+                  label="Primary request"
+                  value={formatLabel(
+                    data.request?.type
+                  )}
+                />
               </div>
 
+              {resources.length > 0 && (
+                <div className="mt-5">
+                  <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                    Requested resources
+                  </p>
+
+                  <div className="flex flex-wrap gap-2">
+                    {resources.map(
+                      (resource, index) => (
+                        <span
+                          key={`${resource}-${index}`}
+                          className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700"
+                        >
+                          {formatLabel(resource)}
+                        </span>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
             </ModalSection>
-
           )}
-
 
           {/* ======================================================
               ASSISTANCE NEEDED
           ====================================================== */}
 
-          {needs && (
+          {needs &&
+            (
+              needs.rescue ||
+              needs.medicine ||
+              needs.water ||
+              needs.food ||
+              needs.shelter ||
+              needs.medical_transfer
+            ) && (
+              <ModalSection
+                title="Assistance needed"
+                icon={<HeartPulse size={16} />}
+              >
+                <div className="flex flex-wrap gap-2">
+                  {needs.rescue && (
+                    <NeedBadge
+                      icon={
+                        <ShieldAlert size={14} />
+                      }
+                      label="Rescue"
+                    />
+                  )}
 
+                  {needs.medicine && (
+                    <NeedBadge
+                      icon={
+                        <HeartPulse size={14} />
+                      }
+                      label="Medicine"
+                    />
+                  )}
+
+                  {needs.water && (
+                    <NeedBadge
+                      icon={
+                        <Droplets size={14} />
+                      }
+                      label="Water"
+                    />
+                  )}
+
+                  {needs.food && (
+                    <NeedBadge
+                      icon={
+                        <Utensils size={14} />
+                      }
+                      label="Food"
+                    />
+                  )}
+
+                  {needs.shelter && (
+                    <NeedBadge
+                      icon={
+                        <Home size={14} />
+                      }
+                      label="Shelter"
+                    />
+                  )}
+
+                  {needs.medical_transfer && (
+                    <NeedBadge
+                      icon={
+                        <HeartPulse size={14} />
+                      }
+                      label="Medical transfer"
+                    />
+                  )}
+                </div>
+              </ModalSection>
+            )}
+
+          {/* ======================================================
+              PRIORITY
+          ====================================================== */}
+
+          {data.priority && (
             <ModalSection
-              title="Assistance needed"
+              title="Priority assessment"
               icon={<ShieldAlert size={16} />}
             >
+              <div>
+                <DetailRow
+                  label="Priority"
+                  value={
+                    data.priority.priority
+                  }
+                />
 
-              <div className="flex flex-wrap gap-2">
+                <DetailRow
+                  label="Priority score"
+                  value={
+                    data.priority.priority_score
+                  }
+                />
 
-                {needs.rescue && (
-                  <NeedBadge
-                    icon={<ShieldAlert size={14} />}
-                    label="Rescue"
-                  />
-                )}
+                <DetailRow
+                  label="Incident ID"
+                  value={
+                    data.priority.incident_id
+                  }
+                />
 
-                {needs.medicine && (
-                  <NeedBadge
-                    icon={<HeartPulse size={14} />}
-                    label="Medicine"
-                  />
-                )}
+                <DetailRow
+                  label="Status"
+                  value={
+                    data.priority.status
+                  }
+                />
 
-                {needs.water && (
-                  <NeedBadge
-                    icon={<Droplets size={14} />}
-                    label="Water"
-                  />
-                )}
+                <DetailRow
+                  label="People"
+                  value={
+                    data.priority.people
+                  }
+                />
 
-                {needs.food && (
-                  <NeedBadge
-                    icon={<Utensils size={14} />}
-                    label="Food"
-                  />
-                )}
+                <DetailRow
+                  label="Latitude"
+                  value={
+                    data.priority.latitude
+                  }
+                />
 
-                {needs.shelter && (
-                  <NeedBadge
-                    icon={<Home size={14} />}
-                    label="Shelter"
-                  />
-                )}
+                <DetailRow
+                  label="Longitude"
+                  value={
+                    data.priority.longitude
+                  }
+                />
 
-                {needs.medical_transfer && (
-                  <NeedBadge
-                    icon={<HeartPulse size={14} />}
-                    label="Medical transfer"
-                  />
-                )}
+                <DetailRow
+                  label="People score"
+                  value={
+                    data.priority
+                      .score_breakdown
+                      ?.people_score
+                  }
+                />
 
+                <DetailRow
+                  label="Vulnerability score"
+                  value={
+                    data.priority
+                      .score_breakdown
+                      ?.vulnerability_score
+                  }
+                />
+
+                <DetailRow
+                  label="Needs score"
+                  value={
+                    data.priority
+                      .score_breakdown
+                      ?.needs_score
+                  }
+                />
+
+                <DetailRow
+                  label="Request score"
+                  value={
+                    data.priority
+                      .score_breakdown
+                      ?.request_score
+                  }
+                />
+
+                <DetailRow
+                  label="Flood score"
+                  value={
+                    data.priority
+                      .score_breakdown
+                      ?.flood_score
+                  }
+                />
+
+                <DetailRow
+                  label="Location score"
+                  value={
+                    data.priority
+                      .score_breakdown
+                      ?.location_score
+                  }
+                />
+
+                <DetailRow
+                  label="SOS people"
+                  value={
+                    data.priority.inputs
+                      ?.sos_people
+                  }
+                />
+
+                <DetailRow
+                  label="Feature 2 people"
+                  value={
+                    data.priority.inputs
+                      ?.feature2_people
+                  }
+                />
+
+                <DetailRow
+                  label="Effective people"
+                  value={
+                    data.priority.inputs
+                      ?.effective_people
+                  }
+                />
+
+                <DetailRow
+                  label="Flood severity"
+                  value={
+                    data.priority.inputs
+                      ?.flood_severity
+                  }
+                />
               </div>
 
+              {data.priority
+                .recommended_actions &&
+                data.priority
+                  .recommended_actions.length > 0 && (
+                  <div className="mt-5">
+                    <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                      Recommended actions
+                    </p>
+
+                    <div className="flex flex-wrap gap-2">
+                      {data.priority
+                        .recommended_actions
+                        .map(
+                          (
+                            action,
+                            index
+                          ) => (
+                            <span
+                              key={`${action}-${index}`}
+                              className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700"
+                            >
+                              {formatLabel(
+                                action
+                              )}
+                            </span>
+                          )
+                        )}
+                    </div>
+                  </div>
+                )}
             </ModalSection>
-
           )}
-
 
           {/* ======================================================
               SITUATION
           ====================================================== */}
 
           {data.situation && (
-
             <ModalSection
               title="Situation"
               icon={<FileText size={16} />}
             >
-
               <p className="text-sm leading-6 text-slate-600">
                 {data.situation}
               </p>
-
             </ModalSection>
-
           )}
-
 
           {/* ======================================================
               CONTACT
           ====================================================== */}
 
           {contacts.length > 0 && (
-
             <ModalSection
               title="Contact"
               icon={<Phone size={16} />}
             >
-
-              <div className="space-y-2">
-
+              <div>
                 {contacts.map(
                   (contact, index) => (
-
-                    <p
+                    <DetailRow
                       key={`${contact}-${index}`}
-                      className="text-sm font-semibold text-[#0f2742]"
-                    >
-                      {contact}
-                    </p>
-
+                      label={
+                        contacts.length > 1
+                          ? `Contact ${index + 1}`
+                          : "Contact"
+                      }
+                      value={contact}
+                    />
                   )
                 )}
-
               </div>
-
             </ModalSection>
-
           )}
-
 
           {/* ======================================================
               ORIGINAL MESSAGE
           ====================================================== */}
 
           {originalMessage && (
-
             <ModalSection
               title="Original SOS message"
               icon={<FileText size={16} />}
             >
-
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-
-                <p className="whitespace-pre-wrap wrap-break-word text-sm leading-6 text-slate-600">
+                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">
                   {originalMessage}
                 </p>
-
               </div>
-
             </ModalSection>
-
           )}
-
         </div>
-
       </div>
-
     </div>
-
   )
 }
-
 
 /* ================================================================
    MODAL SECTION
@@ -859,13 +979,9 @@ function ModalSection({
   icon: React.ReactNode
   children: React.ReactNode
 }) {
-
   return (
-
     <section>
-
       <div className="mb-3 flex items-center gap-2">
-
         <div className="text-slate-400">
           {icon}
         </div>
@@ -873,29 +989,24 @@ function ModalSection({
         <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
           {title}
         </h3>
-
       </div>
 
       {children}
-
     </section>
-
   )
 }
 
-
 /* ================================================================
-   DETAIL BOX
+   DETAIL ROW
 ================================================================ */
 
-function DetailBox({
+function DetailRow({
   label,
   value,
 }: {
   label: string
-  value?: string | number | null
+  value?: string | number | boolean | null
 }) {
-
   if (
     value === null ||
     value === undefined ||
@@ -905,22 +1016,17 @@ function DetailBox({
   }
 
   return (
-
-    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3">
-
-      <div className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
+    <div className="flex items-start justify-between gap-6 border-b border-slate-200 py-3 last:border-b-0">
+      <span className="shrink-0 text-sm text-slate-500">
         {label}
-      </div>
+      </span>
 
-      <div className="mt-1 text-sm font-semibold text-[#0f2742]">
+      <span className="max-w-[68%] whitespace-pre-wrap break-words text-right text-sm font-semibold text-[#0f2742]">
         {String(value)}
-      </div>
-
+      </span>
     </div>
-
   )
 }
-
 
 /* ================================================================
    NEED BADGE
@@ -933,16 +1039,10 @@ function NeedBadge({
   icon: React.ReactNode
   label: string
 }) {
-
   return (
-
     <span className="flex items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700">
-
       {icon}
-
       {label}
-
     </span>
-
   )
 }
